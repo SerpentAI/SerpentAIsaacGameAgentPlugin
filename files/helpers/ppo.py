@@ -67,7 +67,7 @@ class SerpentPPO:
             baseline=None,
             baseline_optimizer=None,
             gae_lambda=None,
-            likelihood_ratio_clipping=0.15,
+            likelihood_ratio_clipping=0.25,
             step_optimizer=None,
             optimization_steps=10
         )

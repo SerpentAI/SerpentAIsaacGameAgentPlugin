@@ -14,6 +14,9 @@ import itertools
 import collections
 
 import time
+import random
+import os
+import pickle
 
 import numpy as np
 
@@ -117,12 +120,19 @@ class SerpentAIsaacGameAgent(GameAgent):
             game_inputs=self.game_inputs
         )
 
+        try:
+            self.ppo_agent.agent.restore_model(directory=os.path.join(os.getcwd(), "datasets", "aisaac"))
+            self.restore_metadata()
+        except Exception:
+            pass
+
         # Warm Agent?
         game_frame_buffer = FrameGrabber.get_frames([0, 2, 4, 6], frame_type="PIPELINE")
         self.ppo_agent.generate_action(game_frame_buffer)
 
-        self.health = collections.deque(np.full((8,), 6), maxlen=8)
-        self.boss_health = collections.deque(np.full((8,), 654), maxlen=8)
+        self.health = collections.deque(np.full((16,), 24), maxlen=16)
+        self.boss_health = collections.deque(np.full((16,), 654), maxlen=16)
+
 
         self.boss_skull_image = None
 
@@ -131,7 +141,7 @@ class SerpentAIsaacGameAgent(GameAgent):
 
     def handle_play(self, game_frame):
         if self.first_run:
-            self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330"])
+            self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330", "c92", "c92", "c92"])
             self.first_run = False
 
             self.run_count += 1
@@ -152,7 +162,7 @@ class SerpentAIsaacGameAgent(GameAgent):
         # Check for Curse of Unknown
         if not len(hearts):
             self.input_controller.tap_key(KeyboardKey.KEY_R, duration=1.5)
-            self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330"])
+            self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330", "c92", "c92", "c92"])
 
             return None
 
@@ -162,33 +172,62 @@ class SerpentAIsaacGameAgent(GameAgent):
         reward, is_alive = self.reward_aisaac([None, None, game_frame, None])
         self.run_reward += reward
 
-        self.printer.add(f"Current Reward: {reward}")
-        self.printer.add(f"Run Reward: {self.run_reward}")
+        self.printer.add(f"Current Reward: {round(reward, 2)}")
+        self.printer.add(f"Run Reward: {round(self.run_reward, 2)}")
         self.printer.add("")
 
         if self.frame_buffer is not None:
-            self.ppo_agent.observe(reward, terminal=(not is_alive or self._is_boss_dead(game_frame)))
             self.observation_count += 1
 
+            if self.ppo_agent.agent.batch_count == 2047:
+                self.printer.flush()
+                self.printer.add("Updating AIsaac Model With New Data... ")
+                self.printer.flush()
+
+                self.input_controller.tap_key(KeyboardKey.KEY_ESCAPE)
+                self.ppo_agent.observe(reward, terminal=(not is_alive or self._is_boss_dead(game_frame)))
+                self.input_controller.tap_key(KeyboardKey.KEY_ESCAPE)
+
+                self.frame_buffer = None
+
+                return None
+            else:
+                self.ppo_agent.observe(reward, terminal=(not is_alive or self._is_boss_dead(game_frame)))
+
         self.printer.add(f"Observation Count: {self.observation_count}")
+        self.printer.add(f"Current Batch Size: {self.ppo_agent.agent.batch_count}")
         self.printer.add("")
 
         if is_alive:
+            if random.random() <= 0.05:
+                self.printer.add("Randomness strikes!")
+                self.printer.flush()
+
+                for i in range(3):
+                    random_game_input = self.game_inputs[random.choice(list(self.game_inputs))]
+                    self.input_controller.handle_keys(random_game_input)
+
+                    time.sleep(0.125)
+
+                self.frame_buffer = None
+
+                return None
+
             self.death_check = False
 
-            self.printer.add(f"Average Rewards (Last 10 Runs): {self.average_reward_10}")
-            self.printer.add(f"Average Rewards (Last 100 Runs): {self.average_reward_100}")
-            self.printer.add(f"Average Rewards (Last 1000 Runs): {self.average_reward_1000}")
+            self.printer.add(f"Average Rewards (Last 10 Runs): {round(self.average_reward_10, 2)}")
+            self.printer.add(f"Average Rewards (Last 100 Runs): {round(self.average_reward_100, 2)}")
+            self.printer.add(f"Average Rewards (Last 1000 Runs): {round(self.average_reward_1000, 2)}")
             self.printer.add("")
-            self.printer.add(f"Top Run Reward: {self.top_reward} (Run #{self.top_reward_run})")
+            self.printer.add(f"Top Run Reward: {round(self.top_reward, 2)} (Run #{self.top_reward_run})")
             self.printer.add("")
-            self.printer.add(f"Previous Run Time Alive: {self.previous_time_alive}")
+            self.printer.add(f"Previous Run Time Alive: {round(self.previous_time_alive, 2)}")
             self.printer.add("")
-            self.printer.add(f"Average Time Alive (Last 10 Runs): {self.average_time_alive_10}")
-            self.printer.add(f"Average Time Alive (Last 100 Runs): {self.average_time_alive_100}")
-            self.printer.add(f"Average Time Alive (Last 1000 Runs): {self.average_time_alive_1000}")
+            self.printer.add(f"Average Time Alive (Last 10 Runs): {round(self.average_time_alive_10, 2)}")
+            self.printer.add(f"Average Time Alive (Last 100 Runs): {round(self.average_time_alive_100, 2)}")
+            self.printer.add(f"Average Time Alive (Last 1000 Runs): {round(self.average_time_alive_1000, 2)}")
             self.printer.add("")
-            self.printer.add(f"Top Time Alive: {self.top_time_alive} (Run #{self.top_time_alive_run})")
+            self.printer.add(f"Top Time Alive: {round(self.top_time_alive, 2)} (Run #{self.top_time_alive_run})")
             self.printer.add("")
             self.printer.add("Latest Inputs:")
             self.printer.add("")
@@ -244,33 +283,91 @@ class SerpentAIsaacGameAgent(GameAgent):
                     self.top_time_alive = self.previous_time_alive
                     self.top_time_alive_run = self.run_count - 1
 
-                self.health = collections.deque(np.full((8,), 6), maxlen=8)
-                self.boss_health = collections.deque(np.full((8,), 654), maxlen=8)
+                if not self.run_count % 10:
+                    self.ppo_agent.agent.save_model(directory=os.path.join(os.getcwd(), "datasets", "aisaac", "ppo_model"), append_timestep=False)
+                    self.dump_metadata()
+
+                self.health = collections.deque(np.full((16,), 24), maxlen=16)
+                self.boss_health = collections.deque(np.full((16,), 654), maxlen=16)
 
                 self.performed_inputs.clear()
 
                 self.frame_buffer = None
 
                 self.input_controller.tap_key(KeyboardKey.KEY_R, duration=1.5)
-                self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330"])
+                self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330", "c92", "c92", "c92"])
 
                 self.run_timestamp = time.time()
 
     def reward_aisaac(self, frames, **kwargs):
+        damage_multiplier = 1 / len(set(self.health))
+
         reward = 0
         is_alive = self.health[0] + self.health[1]
 
         if is_alive:
-            reward += 0.05
+            reward += 0.5
 
             if self.health[0] < self.health[1]:
                 factor = self.health[1] - self.health[0]
-                reward -= 0.025 * factor
+                reward -= factor * 0.25
+
+                return reward, is_alive
 
         if self.boss_health[0] < self.boss_health[1]:
-            reward += 0.95
+            reward += (0.5 * damage_multiplier)
 
         return reward, is_alive
+
+    def dump_metadata(self):
+        metadata = dict(
+            started_at=self.started_at,
+            run_count=self.run_count - 1,
+            observation_count=self.observation_count,
+            reward_10=self.reward_10,
+            reward_100=self.reward_100,
+            reward_1000=self.reward_1000,
+            average_reward_10=self.average_reward_10,
+            average_reward_100=self.average_reward_100,
+            average_reward_1000=self.average_reward_1000,
+            top_reward=self.top_reward,
+            top_reward_run=self.top_reward_run,
+            time_alive_10=self.time_alive_10,
+            time_alive_100=self.time_alive_100,
+            time_alive_1000=self.time_alive_1000,
+            average_time_alive_10=self.average_time_alive_10,
+            average_time_alive_100=self.average_time_alive_100,
+            average_time_alive_1000=self.average_time_alive_1000,
+            top_time_alive=self.top_time_alive,
+            top_time_alive_run=self.top_time_alive_run
+        )
+
+        with open("datasets/aisaac/metadata.json", "wb") as f:
+            f.write(pickle.dumps(metadata))
+
+    def restore_metadata(self):
+        with open("datasets/aisaac/metadata.json", "rb") as f:
+            metadata = pickle.loads(f.read())
+
+        self.started_at = metadata["started_at"]
+        self.run_count = metadata["run_count"]
+        self.observation_count = metadata["observation_count"]
+        self.reward_10 = metadata["reward_10"]
+        self.reward_100 = metadata["reward_100"]
+        self.reward_1000 = metadata["reward_1000"]
+        self.average_reward_10 = metadata["average_reward_10"]
+        self.average_reward_100 = metadata["average_reward_100"]
+        self.average_reward_1000 = metadata["average_reward_1000"]
+        self.top_reward = metadata["top_reward"]
+        self.top_reward_run = metadata["top_reward_run"]
+        self.time_alive_10 = metadata["time_alive_10"]
+        self.time_alive_100 = metadata["time_alive_100"]
+        self.time_alive_1000 = metadata["time_alive_1000"]
+        self.average_time_alive_10 = metadata["average_time_alive_10"]
+        self.average_time_alive_100 = metadata["average_time_alive_100"]
+        self.average_time_alive_1000 = metadata["average_time_alive_1000"]
+        self.top_time_alive = metadata["top_time_alive"]
+        self.top_time_alive_run = metadata["top_time_alive_run"]
 
     def _goto_boss(self, boss_key="1010", items=None):
         self.input_controller.tap_key(KeyboardKey.KEY_SPACE)
@@ -281,12 +378,14 @@ class SerpentAIsaacGameAgent(GameAgent):
         if items is not None:
             for item in items:
                 pyperclip.copy(f"giveitem {item}")
-                self.input_controller.tap_keys([KeyboardKey.KEY_LEFT_CTRL, KeyboardKey.KEY_V])
+                self.input_controller.tap_keys([KeyboardKey.KEY_LEFT_CTRL, KeyboardKey.KEY_V], duration=0.1)
+                time.sleep(0.1)
                 self.input_controller.tap_key(KeyboardKey.KEY_ENTER)
                 time.sleep(0.1)
 
         pyperclip.copy(f"goto s.boss.{boss_key}")
-        self.input_controller.tap_keys([KeyboardKey.KEY_LEFT_CTRL, KeyboardKey.KEY_V])
+        self.input_controller.tap_keys([KeyboardKey.KEY_LEFT_CTRL, KeyboardKey.KEY_V], duration=0.1)
+        time.sleep(0.1)
 
         self.input_controller.tap_key(KeyboardKey.KEY_ENTER)
         time.sleep(0.1)
