@@ -4,6 +4,8 @@ from serpent.frame_grabber import FrameGrabber
 
 from serpent.input_controller import KeyboardKey
 
+from serpent.config import config
+
 import serpent.cv
 
 from .helpers.frame_processing import frame_to_hearts
@@ -14,9 +16,10 @@ import itertools
 import collections
 
 import time
-import random
 import os
 import pickle
+import subprocess
+import shlex
 
 import numpy as np
 
@@ -42,6 +45,8 @@ class SerpentAIsaacGameAgent(GameAgent):
 
         self.frame_handler_setups["PLAY"] = self.setup_play
 
+        self.frame_handler_pause_callbacks["PLAY"] = self.handle_play_pause
+
         self.printer = TerminalPrinter()
 
     @property
@@ -49,6 +54,51 @@ class SerpentAIsaacGameAgent(GameAgent):
         return {
             "MONSTRO": "1010"
         }
+
+    def relaunch(self):
+        self.printer.flush()
+
+        self.printer.add("")
+        self.printer.add("The game appears to have crashed...")
+        self.printer.add("")
+
+        self.printer.add("Hot-swapping the game window the agent is looking at...")
+        self.printer.add("The experiment will resume once the new game window is ready!")
+        self.printer.add("")
+
+        self.printer.flush()
+
+        self.game.stop_frame_grabber()
+
+        time.sleep(1)
+
+        self.input_controller.tap_key(KeyboardKey.KEY_ENTER, force=True)
+
+        time.sleep(1)
+
+        subprocess.call(shlex.split("serpent launch AIsaac"))
+        self.game.launch(dry_run=True)
+
+        self.game.start_frame_grabber()
+        self.game.redis_client.delete(config["frame_grabber"]["redis_key"])
+
+        while self.game.redis_client.llen(config["frame_grabber"]["redis_key"]) == 0:
+            time.sleep(0.1)
+
+        self.game.window_controller.focus_window(self.game.window_id)
+
+        time.sleep(3)
+
+        self.input_controller.tap_key(KeyboardKey.KEY_ENTER)
+        time.sleep(0.2)
+        self.input_controller.tap_key(KeyboardKey.KEY_ENTER)
+        time.sleep(0.2)
+        self.input_controller.tap_key(KeyboardKey.KEY_ENTER)
+        time.sleep(0.2)
+        self.input_controller.tap_key(KeyboardKey.KEY_ENTER)
+        time.sleep(3)
+
+        self.printer.flush()
 
     def setup_play(self):
         self.first_run = True
@@ -131,20 +181,27 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.ppo_agent.generate_action(game_frame_buffer)
 
         self.health = collections.deque(np.full((16,), 24), maxlen=16)
-        self.boss_health = collections.deque(np.full((16,), 654), maxlen=16)
+        self.boss_health = collections.deque(np.full((24,), 654), maxlen=24)
 
+        self.multiplier_alive = 1.0
+        self.multiplier_damage = 1.0
 
         self.boss_skull_image = None
 
         self.started_at = datetime.utcnow().isoformat()
+        self.paused_at = None
+
         self.run_timestamp = None
 
     def handle_play(self, game_frame):
+        self.paused_at = None
+
         if self.first_run:
+            self.run_count += 1
+
             self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330", "c92", "c92", "c92"])
             self.first_run = False
 
-            self.run_count += 1
             self.run_timestamp = time.time()
 
             return None
@@ -170,14 +227,16 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.boss_health.appendleft(self._get_boss_health(game_frame))
 
         reward, is_alive = self.reward_aisaac([None, None, game_frame, None])
-        self.run_reward += reward
 
         self.printer.add(f"Current Reward: {round(reward, 2)}")
         self.printer.add(f"Run Reward: {round(self.run_reward, 2)}")
         self.printer.add("")
 
         if self.frame_buffer is not None:
+            self.run_reward += reward
             self.observation_count += 1
+
+            self.analytics_client.track(event_key="RUN_REWARD", data=dict(reward=reward))
 
             if self.ppo_agent.agent.batch_count == 2047:
                 self.printer.flush()
@@ -190,6 +249,7 @@ class SerpentAIsaacGameAgent(GameAgent):
 
                 self.frame_buffer = None
 
+                time.sleep(1)
                 return None
             else:
                 self.ppo_agent.observe(reward, terminal=(not is_alive or self._is_boss_dead(game_frame)))
@@ -199,22 +259,11 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.printer.add("")
 
         if is_alive:
-            if random.random() <= 0.05:
-                self.printer.add("Randomness strikes!")
-                self.printer.flush()
-
-                for i in range(3):
-                    random_game_input = self.game_inputs[random.choice(list(self.game_inputs))]
-                    self.input_controller.handle_keys(random_game_input)
-
-                    time.sleep(0.125)
-
-                self.frame_buffer = None
-
-                return None
-
             self.death_check = False
 
+            self.printer.add(f"Survival Multiplier: {round(self.multiplier_alive, 2)}")
+            self.printer.add(f"Boss Damage Multiplier: {round(self.multiplier_damage, 2)}")
+            self.printer.add("")
             self.printer.add(f"Average Rewards (Last 10 Runs): {round(self.average_reward_10, 2)}")
             self.printer.add(f"Average Rewards (Last 100 Runs): {round(self.average_reward_100, 2)}")
             self.printer.add(f"Average Rewards (Last 1000 Runs): {round(self.average_reward_1000, 2)}")
@@ -252,6 +301,8 @@ class SerpentAIsaacGameAgent(GameAgent):
                 self.printer.flush()
                 return None
             else:
+                self.analytics_client.track(event_key="RUN_END", data=dict(run=self.run_count))
+
                 self.printer.flush()
                 self.run_count += 1
 
@@ -266,6 +317,8 @@ class SerpentAIsaacGameAgent(GameAgent):
                 if self.run_reward > self.top_reward:
                     self.top_reward = self.run_reward
                     self.top_reward_run = self.run_count - 1
+
+                self.analytics_client.track(event_key="EPISODE_REWARD", data=dict(reward=self.run_reward))
 
                 self.previous_time_alive = time.time() - self.run_timestamp
 
@@ -290,6 +343,9 @@ class SerpentAIsaacGameAgent(GameAgent):
                 self.health = collections.deque(np.full((16,), 24), maxlen=16)
                 self.boss_health = collections.deque(np.full((16,), 654), maxlen=16)
 
+                self.multiplier_alive = 1.0
+                self.multiplier_damage = 1.0
+
                 self.performed_inputs.clear()
 
                 self.frame_buffer = None
@@ -299,23 +355,44 @@ class SerpentAIsaacGameAgent(GameAgent):
 
                 self.run_timestamp = time.time()
 
+    def handle_play_pause(self):
+        if self.paused_at is None:
+            self.paused_at = time.time()
+
+        # Give ourselves 30 seconds to work with
+        if time.time() - self.paused_at >= 30:
+            self.relaunch()
+
+            self.run_count -= 1
+            self.first_run = True
+
     def reward_aisaac(self, frames, **kwargs):
-        damage_multiplier = 1 / len(set(self.health))
+        boss_damaged_recently = len(set(self.boss_health)) > 1
+
+        if boss_damaged_recently:
+            self.multiplier_alive = 1.0
+        else:
+            if self.multiplier_alive - 0.03 >= 0.2:
+                self.multiplier_alive -= 0.03
+            else:
+                self.multiplier_alive = 0.2
+
+        self.multiplier_damage = 1 / len(set(self.health))
 
         reward = 0
         is_alive = self.health[0] + self.health[1]
 
         if is_alive:
-            reward += 0.5
+            reward += (0.5 * self.multiplier_alive)
 
             if self.health[0] < self.health[1]:
                 factor = self.health[1] - self.health[0]
-                reward -= factor * 0.25
+                reward -= factor * 0.25 * self.multiplier_alive
 
                 return reward, is_alive
 
         if self.boss_health[0] < self.boss_health[1]:
-            reward += (0.5 * damage_multiplier)
+            reward += (0.5 * self.multiplier_damage)
 
         return reward, is_alive
 
@@ -395,6 +472,8 @@ class SerpentAIsaacGameAgent(GameAgent):
         time.sleep(0.5)
         self.input_controller.tap_key(KeyboardKey.KEY_ENTER)
         time.sleep(0.2)
+
+        self.analytics_client.track(event_key="RUN_START", data=dict(run=self.run_count))
 
     def _get_boss_health(self, game_frame):
         gray_boss_health_bar = serpent.cv.extract_region_from_image(
