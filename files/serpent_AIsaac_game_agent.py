@@ -133,12 +133,15 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.run_reward = 0
 
         self.observation_count = 0
+        self.episode_observation_count = 0
 
         self.performed_inputs = collections.deque(list(), maxlen=8)
 
         self.reward_10 = collections.deque(list(), maxlen=10)
         self.reward_100 = collections.deque(list(), maxlen=100)
         self.reward_1000 = collections.deque(list(), maxlen=1000)
+
+        self.rewards = list()
 
         self.average_reward_10 = 0
         self.average_reward_100 = 0
@@ -147,18 +150,18 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.top_reward = 0
         self.top_reward_run = 0
 
-        self.previous_time_alive = 0
+        self.previous_boss_hp = 0
 
-        self.time_alive_10 = collections.deque(list(), maxlen=10)
-        self.time_alive_100 = collections.deque(list(), maxlen=100)
-        self.time_alive_1000 = collections.deque(list(), maxlen=1000)
+        self.boss_hp_10 = collections.deque(list(), maxlen=10)
+        self.boss_hp_100 = collections.deque(list(), maxlen=100)
+        self.boss_hp_1000 = collections.deque(list(), maxlen=1000)
 
-        self.average_time_alive_10 = 0
-        self.average_time_alive_100 = 0
-        self.average_time_alive_1000 = 0
+        self.average_boss_hp_10 = 654
+        self.average_boss_hp_100 = 654
+        self.average_boss_hp_1000 = 654
 
-        self.top_time_alive = 0
-        self.top_time_alive_run = 0
+        self.best_boss_hp = 654
+        self.best_boss_hp_run = 0
 
         self.death_check = False
         self.just_relaunched = False
@@ -176,6 +179,11 @@ class SerpentAIsaacGameAgent(GameAgent):
         except Exception:
             pass
 
+        self.analytics_client.track(
+            event_key="INITIALIZE",
+            data=dict(episode_rewards=[[index, reward] for index, reward in enumerate(self.rewards)])
+        )
+
         # Warm Agent?
         game_frame_buffer = FrameGrabber.get_frames([0, 2, 4, 6], frame_type="PIPELINE")
         self.ppo_agent.generate_action(game_frame_buffer)
@@ -189,9 +197,9 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.boss_skull_image = None
 
         self.started_at = datetime.utcnow().isoformat()
-        self.paused_at = None
+        self.episode_started_at = None
 
-        self.run_timestamp = None
+        self.paused_at = None
 
     def handle_play(self, game_frame):
         self.paused_at = None
@@ -202,7 +210,7 @@ class SerpentAIsaacGameAgent(GameAgent):
             self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330", "c92", "c92", "c92"])
             self.first_run = False
 
-            self.run_timestamp = time.time()
+            self.episode_started_at = time.time()
 
             return None
 
@@ -234,12 +242,21 @@ class SerpentAIsaacGameAgent(GameAgent):
 
         if self.frame_buffer is not None:
             self.run_reward += reward
+
             self.observation_count += 1
+            self.episode_observation_count += 1
 
             self.analytics_client.track(event_key="RUN_REWARD", data=dict(reward=reward))
 
+            episode_over = self.episode_observation_count > 799  # Is this too Monstro-specific?
+
+            if episode_over:
+                is_alive = False
+                self.death_check = True
+
             if self.ppo_agent.agent.batch_count == 2047:
                 self.printer.flush()
+                self.printer.add("")
                 self.printer.add("Updating AIsaac Model With New Data... ")
                 self.printer.flush()
 
@@ -249,12 +266,14 @@ class SerpentAIsaacGameAgent(GameAgent):
 
                 self.frame_buffer = None
 
-                time.sleep(1)
-                return None
+                if not episode_over:
+                    time.sleep(1)
+                    return None
             else:
                 self.ppo_agent.observe(reward, terminal=(not is_alive or self._is_boss_dead(game_frame)))
 
         self.printer.add(f"Observation Count: {self.observation_count}")
+        self.printer.add(f"Episode Observation Count: {self.episode_observation_count}")
         self.printer.add(f"Current Batch Size: {self.ppo_agent.agent.batch_count}")
         self.printer.add("")
 
@@ -270,13 +289,13 @@ class SerpentAIsaacGameAgent(GameAgent):
             self.printer.add("")
             self.printer.add(f"Top Run Reward: {round(self.top_reward, 2)} (Run #{self.top_reward_run})")
             self.printer.add("")
-            self.printer.add(f"Previous Run Time Alive: {round(self.previous_time_alive, 2)}")
+            self.printer.add(f"Previous Run Boss HP: {round(self.previous_boss_hp, 2)} / 654")
             self.printer.add("")
-            self.printer.add(f"Average Time Alive (Last 10 Runs): {round(self.average_time_alive_10, 2)}")
-            self.printer.add(f"Average Time Alive (Last 100 Runs): {round(self.average_time_alive_100, 2)}")
-            self.printer.add(f"Average Time Alive (Last 1000 Runs): {round(self.average_time_alive_1000, 2)}")
+            self.printer.add(f"Average Boss HP (Last 10 Runs): {round(self.average_boss_hp_10, 2)} / 654")
+            self.printer.add(f"Average Boss HP (Last 100 Runs): {round(self.average_boss_hp_100, 2)} / 654")
+            self.printer.add(f"Average Boss HP (Last 1000 Runs): {round(self.average_boss_hp_1000, 2)} / 654")
             self.printer.add("")
-            self.printer.add(f"Top Time Alive: {round(self.top_time_alive, 2)} (Run #{self.top_time_alive_run})")
+            self.printer.add(f"Best Boss HP: {round(self.best_boss_hp, 2)} (Run #{self.best_boss_hp_run}) / 654")
             self.printer.add("")
             self.printer.add("Latest Inputs:")
             self.printer.add("")
@@ -310,6 +329,8 @@ class SerpentAIsaacGameAgent(GameAgent):
                 self.reward_100.appendleft(self.run_reward)
                 self.reward_1000.appendleft(self.run_reward)
 
+                self.rewards.append(self.run_reward)
+
                 self.average_reward_10 = float(np.mean(self.reward_10))
                 self.average_reward_100 = float(np.mean(self.reward_100))
                 self.average_reward_1000 = float(np.mean(self.reward_1000))
@@ -320,21 +341,21 @@ class SerpentAIsaacGameAgent(GameAgent):
 
                 self.analytics_client.track(event_key="EPISODE_REWARD", data=dict(reward=self.run_reward))
 
-                self.previous_time_alive = time.time() - self.run_timestamp
+                self.previous_boss_hp = max(list(self.boss_health)[:3])
 
                 self.run_reward = 0
 
-                self.time_alive_10.appendleft(self.previous_time_alive)
-                self.time_alive_100.appendleft(self.previous_time_alive)
-                self.time_alive_1000.appendleft(self.previous_time_alive)
+                self.boss_hp_10.appendleft(self.previous_boss_hp)
+                self.boss_hp_100.appendleft(self.previous_boss_hp)
+                self.boss_hp_1000.appendleft(self.previous_boss_hp)
 
-                self.average_time_alive_10 = float(np.mean(self.time_alive_10))
-                self.average_time_alive_100 = float(np.mean(self.time_alive_100))
-                self.average_time_alive_1000 = float(np.mean(self.time_alive_1000))
+                self.average_boss_hp_10 = float(np.mean(self.boss_hp_10))
+                self.average_boss_hp_100 = float(np.mean(self.boss_hp_100))
+                self.average_boss_hp_1000 = float(np.mean(self.boss_hp_1000))
 
-                if self.previous_time_alive > self.top_time_alive:
-                    self.top_time_alive = self.previous_time_alive
-                    self.top_time_alive_run = self.run_count - 1
+                if self.previous_boss_hp < self.best_boss_hp:
+                    self.best_boss_hp = self.previous_boss_hp
+                    self.best_boss_hp_run = self.run_count - 1
 
                 if not self.run_count % 10:
                     self.ppo_agent.agent.save_model(directory=os.path.join(os.getcwd(), "datasets", "aisaac", "ppo_model"), append_timestep=False)
@@ -353,7 +374,8 @@ class SerpentAIsaacGameAgent(GameAgent):
                 self.input_controller.tap_key(KeyboardKey.KEY_R, duration=1.5)
                 self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330", "c92", "c92", "c92"])
 
-                self.run_timestamp = time.time()
+                self.episode_started_at = time.time()
+                self.episode_observation_count = 0
 
     def handle_play_pause(self):
         if self.paused_at is None:
@@ -404,19 +426,20 @@ class SerpentAIsaacGameAgent(GameAgent):
             reward_10=self.reward_10,
             reward_100=self.reward_100,
             reward_1000=self.reward_1000,
+            rewards=self.rewards,
             average_reward_10=self.average_reward_10,
             average_reward_100=self.average_reward_100,
             average_reward_1000=self.average_reward_1000,
             top_reward=self.top_reward,
             top_reward_run=self.top_reward_run,
-            time_alive_10=self.time_alive_10,
-            time_alive_100=self.time_alive_100,
-            time_alive_1000=self.time_alive_1000,
-            average_time_alive_10=self.average_time_alive_10,
-            average_time_alive_100=self.average_time_alive_100,
-            average_time_alive_1000=self.average_time_alive_1000,
-            top_time_alive=self.top_time_alive,
-            top_time_alive_run=self.top_time_alive_run
+            boss_hp_10=self.boss_hp_10,
+            boss_hp_100=self.boss_hp_100,
+            boss_hp_1000=self.boss_hp_1000,
+            average_boss_hp_10=self.average_boss_hp_10,
+            average_boss_hp_100=self.average_boss_hp_100,
+            average_boss_hp_1000=self.average_boss_hp_1000,
+            best_boss_hp=self.best_boss_hp,
+            best_boss_hp_run=self.best_boss_hp_run
         )
 
         with open("datasets/aisaac/metadata.json", "wb") as f:
@@ -432,19 +455,20 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.reward_10 = metadata["reward_10"]
         self.reward_100 = metadata["reward_100"]
         self.reward_1000 = metadata["reward_1000"]
+        self.rewards = metadata["rewards"]
         self.average_reward_10 = metadata["average_reward_10"]
         self.average_reward_100 = metadata["average_reward_100"]
         self.average_reward_1000 = metadata["average_reward_1000"]
         self.top_reward = metadata["top_reward"]
         self.top_reward_run = metadata["top_reward_run"]
-        self.time_alive_10 = metadata["time_alive_10"]
-        self.time_alive_100 = metadata["time_alive_100"]
-        self.time_alive_1000 = metadata["time_alive_1000"]
-        self.average_time_alive_10 = metadata["average_time_alive_10"]
-        self.average_time_alive_100 = metadata["average_time_alive_100"]
-        self.average_time_alive_1000 = metadata["average_time_alive_1000"]
-        self.top_time_alive = metadata["top_time_alive"]
-        self.top_time_alive_run = metadata["top_time_alive_run"]
+        self.boss_hp_10 = metadata["boss_hp_10"]
+        self.boss_hp_100 = metadata["boss_hp_100"]
+        self.boss_hp_1000 = metadata["boss_hp_1000"]
+        self.average_boss_hp_10 = metadata["average_boss_hp_10"]
+        self.average_boss_hp_100 = metadata["average_boss_hp_100"]
+        self.average_boss_hp_1000 = metadata["average_boss_hp_1000"]
+        self.best_boss_hp = metadata["best_boss_hp"]
+        self.best_boss_hp_run = metadata["best_boss_hp_run"]
 
     def _goto_boss(self, boss_key="1010", items=None):
         self.input_controller.tap_key(KeyboardKey.KEY_SPACE)
