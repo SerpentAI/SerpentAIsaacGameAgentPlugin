@@ -103,6 +103,13 @@ class SerpentAIsaacGameAgent(GameAgent):
     def setup_play(self):
         self.first_run = True
 
+        self.boss = "MONSTRO"
+        self.items = ["c330"]  # Soy Milk, 3x Super Bandage
+
+        self.boss_hp_mapping = {
+            "MONSTRO": 654
+        }
+
         move_inputs = {
             "MOVE UP": [KeyboardKey.KEY_W],
             "MOVE LEFT": [KeyboardKey.KEY_A],
@@ -150,17 +157,17 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.top_reward = 0
         self.top_reward_run = 0
 
-        self.previous_boss_hp = 0
+        self.previous_boss_hp = self.boss_hp_mapping[self.boss]
 
         self.boss_hp_10 = collections.deque(list(), maxlen=10)
         self.boss_hp_100 = collections.deque(list(), maxlen=100)
         self.boss_hp_1000 = collections.deque(list(), maxlen=1000)
 
-        self.average_boss_hp_10 = 654
-        self.average_boss_hp_100 = 654
-        self.average_boss_hp_1000 = 654
+        self.average_boss_hp_10 = self.boss_hp_mapping[self.boss]
+        self.average_boss_hp_100 = self.boss_hp_mapping[self.boss]
+        self.average_boss_hp_1000 = self.boss_hp_mapping[self.boss]
 
-        self.best_boss_hp = 654
+        self.best_boss_hp = self.boss_hp_mapping[self.boss]
         self.best_boss_hp_run = 0
 
         self.death_check = False
@@ -189,7 +196,7 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.ppo_agent.generate_action(game_frame_buffer)
 
         self.health = collections.deque(np.full((16,), 24), maxlen=16)
-        self.boss_health = collections.deque(np.full((24,), 654), maxlen=24)
+        self.boss_health = collections.deque(np.full((24,), self.boss_hp_mapping[self.boss]), maxlen=24)
 
         self.multiplier_alive = 1.0
         self.multiplier_damage = 1.0
@@ -207,7 +214,7 @@ class SerpentAIsaacGameAgent(GameAgent):
         if self.first_run:
             self.run_count += 1
 
-            self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330", "c92", "c92", "c92"])
+            self._goto_boss()
             self.first_run = False
 
             self.episode_started_at = time.time()
@@ -227,7 +234,7 @@ class SerpentAIsaacGameAgent(GameAgent):
         # Check for Curse of Unknown
         if not len(hearts):
             self.input_controller.tap_key(KeyboardKey.KEY_R, duration=1.5)
-            self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330", "c92", "c92", "c92"])
+            self._goto_boss()
 
             return None
 
@@ -248,7 +255,7 @@ class SerpentAIsaacGameAgent(GameAgent):
 
             self.analytics_client.track(event_key="RUN_REWARD", data=dict(reward=reward))
 
-            episode_over = self.episode_observation_count > 799  # Is this too Monstro-specific?
+            episode_over = self.episode_observation_count > 959
 
             if episode_over:
                 is_alive = False
@@ -289,13 +296,18 @@ class SerpentAIsaacGameAgent(GameAgent):
             self.printer.add("")
             self.printer.add(f"Top Run Reward: {round(self.top_reward, 2)} (Run #{self.top_reward_run})")
             self.printer.add("")
-            self.printer.add(f"Previous Run Boss HP: {round(self.previous_boss_hp, 2)} / 654")
+            boss_hp_percent = round((self.previous_boss_hp / self.boss_hp_mapping[self.boss]) * 100.0, 2)
+            self.printer.add(f"Previous Run Boss HP: {round(self.previous_boss_hp, 2)} / {self.boss_hp_mapping[self.boss]} ({boss_hp_percent}% left)")
             self.printer.add("")
-            self.printer.add(f"Average Boss HP (Last 10 Runs): {round(self.average_boss_hp_10, 2)} / 654")
-            self.printer.add(f"Average Boss HP (Last 100 Runs): {round(self.average_boss_hp_100, 2)} / 654")
-            self.printer.add(f"Average Boss HP (Last 1000 Runs): {round(self.average_boss_hp_1000, 2)} / 654")
+            boss_hp_percent = round((self.average_boss_hp_10 / self.boss_hp_mapping[self.boss]) * 100.0, 2)
+            self.printer.add(f"Average Boss HP (Last 10 Runs): {round(self.average_boss_hp_10, 2)} / {self.boss_hp_mapping[self.boss]} ({boss_hp_percent}% left)")
+            boss_hp_percent = round((self.average_boss_hp_10 / self.boss_hp_mapping[self.boss]) * 100.0, 2)
+            self.printer.add(f"Average Boss HP (Last 100 Runs): {round(self.average_boss_hp_100, 2)} / {self.boss_hp_mapping[self.boss]} ({boss_hp_percent}% left)")
+            boss_hp_percent = round((self.average_boss_hp_10 / self.boss_hp_mapping[self.boss]) * 100.0, 2)
+            self.printer.add(f"Average Boss HP (Last 1000 Runs): {round(self.average_boss_hp_1000, 2)} / {self.boss_hp_mapping[self.boss]} ({boss_hp_percent}% left)")
             self.printer.add("")
-            self.printer.add(f"Best Boss HP: {round(self.best_boss_hp, 2)} (Run #{self.best_boss_hp_run}) / 654")
+            boss_hp_percent = round((self.average_boss_hp_10 / self.boss_hp_mapping[self.boss]) * 100.0, 2)
+            self.printer.add(f"Best Boss HP: {round(self.best_boss_hp, 2)} / {self.boss_hp_mapping[self.boss]} ({boss_hp_percent}% left) (Run #{self.best_boss_hp_run})")
             self.printer.add("")
             self.printer.add("Latest Inputs:")
             self.printer.add("")
@@ -339,6 +351,8 @@ class SerpentAIsaacGameAgent(GameAgent):
                     self.top_reward = self.run_reward
                     self.top_reward_run = self.run_count - 1
 
+                    self.analytics_client.track(event_key="NEW_RECORD", data=dict(type="REWARD", value=self.run_reward, run=self.run_count - 1))
+
                 self.analytics_client.track(event_key="EPISODE_REWARD", data=dict(reward=self.run_reward))
 
                 self.previous_boss_hp = max(list(self.boss_health)[:3])
@@ -357,12 +371,14 @@ class SerpentAIsaacGameAgent(GameAgent):
                     self.best_boss_hp = self.previous_boss_hp
                     self.best_boss_hp_run = self.run_count - 1
 
+                    self.analytics_client.track(event_key="NEW_RECORD", data=dict(type="BOSS_HP", value=self.previous_boss_hp, run=self.run_count - 1))
+
                 if not self.run_count % 10:
                     self.ppo_agent.agent.save_model(directory=os.path.join(os.getcwd(), "datasets", "aisaac", "ppo_model"), append_timestep=False)
                     self.dump_metadata()
 
                 self.health = collections.deque(np.full((16,), 24), maxlen=16)
-                self.boss_health = collections.deque(np.full((16,), 654), maxlen=16)
+                self.boss_health = collections.deque(np.full((16,), self.boss_hp_mapping[self.boss]), maxlen=16)
 
                 self.multiplier_alive = 1.0
                 self.multiplier_damage = 1.0
@@ -372,7 +388,7 @@ class SerpentAIsaacGameAgent(GameAgent):
                 self.frame_buffer = None
 
                 self.input_controller.tap_key(KeyboardKey.KEY_R, duration=1.5)
-                self._goto_boss(boss_key=self.bosses["MONSTRO"], items=["c330", "c92", "c92", "c92"])
+                self._goto_boss()
 
                 self.episode_started_at = time.time()
                 self.episode_observation_count = 0
@@ -470,21 +486,20 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.best_boss_hp = metadata["best_boss_hp"]
         self.best_boss_hp_run = metadata["best_boss_hp_run"]
 
-    def _goto_boss(self, boss_key="1010", items=None):
+    def _goto_boss(self):
         self.input_controller.tap_key(KeyboardKey.KEY_SPACE)
         time.sleep(1)
         self.input_controller.tap_key(KeyboardKey.KEY_GRAVE)
         time.sleep(0.5)
 
-        if items is not None:
-            for item in items:
-                pyperclip.copy(f"giveitem {item}")
-                self.input_controller.tap_keys([KeyboardKey.KEY_LEFT_CTRL, KeyboardKey.KEY_V], duration=0.1)
-                time.sleep(0.1)
-                self.input_controller.tap_key(KeyboardKey.KEY_ENTER)
-                time.sleep(0.1)
+        for item in self.items:
+            pyperclip.copy(f"giveitem {item}")
+            self.input_controller.tap_keys([KeyboardKey.KEY_LEFT_CTRL, KeyboardKey.KEY_V], duration=0.1)
+            time.sleep(0.1)
+            self.input_controller.tap_key(KeyboardKey.KEY_ENTER)
+            time.sleep(0.1)
 
-        pyperclip.copy(f"goto s.boss.{boss_key}")
+        pyperclip.copy(f"goto s.boss.{self.bosses[self.boss]}")
         self.input_controller.tap_keys([KeyboardKey.KEY_LEFT_CTRL, KeyboardKey.KEY_V], duration=0.1)
         time.sleep(0.1)
 
