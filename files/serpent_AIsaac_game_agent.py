@@ -104,7 +104,7 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.first_run = True
 
         self.boss = "MONSTRO"
-        self.items = ["c330"]  # Soy Milk, 3x Super Bandage
+        self.items = []  # Soy Milk, 3x Super Bandage
 
         self.boss_hp_mapping = {
             "MONSTRO": 654
@@ -176,7 +176,7 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.frame_buffer = None
 
         self.ppo_agent = SerpentPPO(
-            frame_shape=(100, 100, 4),
+            frame_shape=(100, 100, 2),
             game_inputs=self.game_inputs
         )
 
@@ -192,7 +192,7 @@ class SerpentAIsaacGameAgent(GameAgent):
         )
 
         # Warm Agent?
-        game_frame_buffer = FrameGrabber.get_frames([0, 2, 4, 6], frame_type="PIPELINE")
+        game_frame_buffer = FrameGrabber.get_frames([0, 1], frame_type="PIPELINE")
         self.ppo_agent.generate_action(game_frame_buffer)
 
         self.health = collections.deque(np.full((16,), 24), maxlen=16)
@@ -241,7 +241,7 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.health.appendleft(24 - hearts.count(None))
         self.boss_health.appendleft(self._get_boss_health(game_frame))
 
-        reward, is_alive = self.reward_aisaac([None, None, game_frame, None])
+        reward, is_alive, boss_dead = self.reward_aisaac([None, None, game_frame, None])
 
         self.printer.add(f"Current Reward: {round(reward, 2)}")
         self.printer.add(f"Run Reward: {round(self.run_reward, 2)}")
@@ -255,20 +255,21 @@ class SerpentAIsaacGameAgent(GameAgent):
 
             self.analytics_client.track(event_key="RUN_REWARD", data=dict(reward=reward))
 
-            episode_over = self.episode_observation_count > 959
+            episode_over = self.episode_observation_count > (120 * config["SerpentAIsaacGamePlugin"]["fps"])
 
             if episode_over:
+                reward = 0
                 is_alive = False
                 self.death_check = True
 
-            if self.ppo_agent.agent.batch_count == 2047:
+            if self.ppo_agent.agent.batch_count == self.ppo_agent.agent.batch_size - 1:
                 self.printer.flush()
                 self.printer.add("")
                 self.printer.add("Updating AIsaac Model With New Data... ")
                 self.printer.flush()
 
                 self.input_controller.tap_key(KeyboardKey.KEY_ESCAPE)
-                self.ppo_agent.observe(reward, terminal=(not is_alive or self._is_boss_dead(game_frame)))
+                self.ppo_agent.observe(reward, terminal=(not is_alive or boss_dead))
                 self.input_controller.tap_key(KeyboardKey.KEY_ESCAPE)
 
                 self.frame_buffer = None
@@ -277,7 +278,7 @@ class SerpentAIsaacGameAgent(GameAgent):
                     time.sleep(1)
                     return None
             else:
-                self.ppo_agent.observe(reward, terminal=(not is_alive or self._is_boss_dead(game_frame)))
+                self.ppo_agent.observe(reward, terminal=reward in [0, 1])
 
         self.printer.add(f"Observation Count: {self.observation_count}")
         self.printer.add(f"Episode Observation Count: {self.episode_observation_count}")
@@ -301,12 +302,12 @@ class SerpentAIsaacGameAgent(GameAgent):
             self.printer.add("")
             boss_hp_percent = round((self.average_boss_hp_10 / self.boss_hp_mapping[self.boss]) * 100.0, 2)
             self.printer.add(f"Average Boss HP (Last 10 Runs): {round(self.average_boss_hp_10, 2)} / {self.boss_hp_mapping[self.boss]} ({boss_hp_percent}% left)")
-            boss_hp_percent = round((self.average_boss_hp_10 / self.boss_hp_mapping[self.boss]) * 100.0, 2)
+            boss_hp_percent = round((self.average_boss_hp_100 / self.boss_hp_mapping[self.boss]) * 100.0, 2)
             self.printer.add(f"Average Boss HP (Last 100 Runs): {round(self.average_boss_hp_100, 2)} / {self.boss_hp_mapping[self.boss]} ({boss_hp_percent}% left)")
-            boss_hp_percent = round((self.average_boss_hp_10 / self.boss_hp_mapping[self.boss]) * 100.0, 2)
+            boss_hp_percent = round((self.average_boss_hp_1000 / self.boss_hp_mapping[self.boss]) * 100.0, 2)
             self.printer.add(f"Average Boss HP (Last 1000 Runs): {round(self.average_boss_hp_1000, 2)} / {self.boss_hp_mapping[self.boss]} ({boss_hp_percent}% left)")
             self.printer.add("")
-            boss_hp_percent = round((self.average_boss_hp_10 / self.boss_hp_mapping[self.boss]) * 100.0, 2)
+            boss_hp_percent = round((self.best_boss_hp / self.boss_hp_mapping[self.boss]) * 100.0, 2)
             self.printer.add(f"Best Boss HP: {round(self.best_boss_hp, 2)} / {self.boss_hp_mapping[self.boss]} ({boss_hp_percent}% left) (Run #{self.best_boss_hp_run})")
             self.printer.add("")
             self.printer.add("Latest Inputs:")
@@ -317,7 +318,7 @@ class SerpentAIsaacGameAgent(GameAgent):
 
             self.printer.flush()
 
-            self.frame_buffer = FrameGrabber.get_frames([0, 2, 4, 6], frame_type="PIPELINE")
+            self.frame_buffer = FrameGrabber.get_frames([0, 1], frame_type="PIPELINE")
 
             action, label, game_input = self.ppo_agent.generate_action(self.frame_buffer)
 
@@ -331,7 +332,7 @@ class SerpentAIsaacGameAgent(GameAgent):
 
                 self.printer.flush()
                 return None
-            else:
+            elif boss_dead or self.death_check:
                 self.analytics_client.track(event_key="RUN_END", data=dict(run=self.run_count))
 
                 self.printer.flush()
@@ -355,7 +356,7 @@ class SerpentAIsaacGameAgent(GameAgent):
 
                 self.analytics_client.track(event_key="EPISODE_REWARD", data=dict(reward=self.run_reward))
 
-                self.previous_boss_hp = max(list(self.boss_health)[:3])
+                self.previous_boss_hp = 0 if boss_dead else max(list(self.boss_health)[:4])
 
                 self.run_reward = 0
 
@@ -367,7 +368,7 @@ class SerpentAIsaacGameAgent(GameAgent):
                 self.average_boss_hp_100 = float(np.mean(self.boss_hp_100))
                 self.average_boss_hp_1000 = float(np.mean(self.boss_hp_1000))
 
-                if self.previous_boss_hp < self.best_boss_hp:
+                if (boss_dead or self.previous_boss_hp > 0) and self.previous_boss_hp < self.best_boss_hp:
                     self.best_boss_hp = self.previous_boss_hp
                     self.best_boss_hp_run = self.run_count - 1
 
@@ -405,34 +406,20 @@ class SerpentAIsaacGameAgent(GameAgent):
             self.first_run = True
 
     def reward_aisaac(self, frames, **kwargs):
-        boss_damaged_recently = len(set(self.boss_health)) > 1
-
-        if boss_damaged_recently:
-            self.multiplier_alive = 1.0
-        else:
-            if self.multiplier_alive - 0.03 >= 0.2:
-                self.multiplier_alive -= 0.03
-            else:
-                self.multiplier_alive = 0.2
-
-        self.multiplier_damage = 1 / len(set(self.health))
-
-        reward = 0
         is_alive = self.health[0] + self.health[1]
 
         if is_alive:
-            reward += (0.5 * self.multiplier_alive)
-
             if self.health[0] < self.health[1]:
-                factor = self.health[1] - self.health[0]
-                reward -= factor * 0.25 * self.multiplier_alive
+                return 0, True, False
+            elif self.boss_health[0] < self.boss_health[1]:
+                return 0.1, True, False
+            else:
+                if self.boss_health[0] < 10 and self._is_boss_dead(frames[-2]):
+                    return 1, True, True
 
-                return reward, is_alive
-
-        if self.boss_health[0] < self.boss_health[1]:
-            reward += (0.5 * self.multiplier_damage)
-
-        return reward, is_alive
+                return 0.001, True, False
+        else:
+            return 0, False, False
 
     def dump_metadata(self):
         metadata = dict(
