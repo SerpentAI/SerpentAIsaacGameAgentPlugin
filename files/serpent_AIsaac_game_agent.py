@@ -104,7 +104,7 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.first_run = True
 
         self.boss = "MONSTRO"
-        self.items = []  # Soy Milk, 3x Super Bandage
+        self.items = []
 
         self.boss_hp_mapping = {
             "MONSTRO": 654
@@ -176,7 +176,7 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.frame_buffer = None
 
         self.ppo_agent = SerpentPPO(
-            frame_shape=(100, 100, 2),
+            frame_shape=(100, 100, 4),
             game_inputs=self.game_inputs
         )
 
@@ -192,11 +192,11 @@ class SerpentAIsaacGameAgent(GameAgent):
         )
 
         # Warm Agent?
-        game_frame_buffer = FrameGrabber.get_frames([0, 1], frame_type="PIPELINE")
+        game_frame_buffer = FrameGrabber.get_frames([0, 1, 2, 3], frame_type="PIPELINE")
         self.ppo_agent.generate_action(game_frame_buffer)
 
-        self.health = collections.deque(np.full((16,), 24), maxlen=16)
-        self.boss_health = collections.deque(np.full((24,), self.boss_hp_mapping[self.boss]), maxlen=24)
+        self.health = collections.deque(np.full((16,), 6), maxlen=16)
+        self.boss_health = collections.deque(np.full((8,), self.boss_hp_mapping[self.boss]), maxlen=8)
 
         self.multiplier_alive = 1.0
         self.multiplier_damage = 1.0
@@ -278,7 +278,7 @@ class SerpentAIsaacGameAgent(GameAgent):
                     time.sleep(1)
                     return None
             else:
-                self.ppo_agent.observe(reward, terminal=reward in [0, 1])
+                self.ppo_agent.observe(reward, terminal=(not is_alive or boss_dead))
 
         self.printer.add(f"Observation Count: {self.observation_count}")
         self.printer.add(f"Episode Observation Count: {self.episode_observation_count}")
@@ -318,7 +318,7 @@ class SerpentAIsaacGameAgent(GameAgent):
 
             self.printer.flush()
 
-            self.frame_buffer = FrameGrabber.get_frames([0, 1], frame_type="PIPELINE")
+            self.frame_buffer = FrameGrabber.get_frames([0, 1, 2, 3], frame_type="PIPELINE")
 
             action, label, game_input = self.ppo_agent.generate_action(self.frame_buffer)
 
@@ -378,8 +378,8 @@ class SerpentAIsaacGameAgent(GameAgent):
                     self.ppo_agent.agent.save_model(directory=os.path.join(os.getcwd(), "datasets", "aisaac", "ppo_model"), append_timestep=False)
                     self.dump_metadata()
 
-                self.health = collections.deque(np.full((16,), 24), maxlen=16)
-                self.boss_health = collections.deque(np.full((16,), self.boss_hp_mapping[self.boss]), maxlen=16)
+                self.health = collections.deque(np.full((16,), 6), maxlen=16)
+                self.boss_health = collections.deque(np.full((8,), self.boss_hp_mapping[self.boss]), maxlen=8)
 
                 self.multiplier_alive = 1.0
                 self.multiplier_damage = 1.0
@@ -406,18 +406,37 @@ class SerpentAIsaacGameAgent(GameAgent):
             self.first_run = True
 
     def reward_aisaac(self, frames, **kwargs):
+        boss_damaged_recently = len(set(self.boss_health)) > 1
+
+        if boss_damaged_recently:
+            self.multiplier_alive = 1.0
+        else:
+            if self.multiplier_alive - 0.01 >= 0.1:
+                self.multiplier_alive -= 0.01
+            else:
+                self.multiplier_alive = 0.1
+
+        self.multiplier_damage = 1 / len(set(self.health))
+
+        reward = 0
         is_alive = self.health[0] + self.health[1]
 
         if is_alive:
+            reward += (0.2 * self.multiplier_alive)
+
             if self.health[0] < self.health[1]:
-                return 0, True, False
+                factor = self.health[1] - self.health[0]
+                reward -= factor * 0.1 * self.multiplier_alive
+
+                return reward, True, False
             elif self.boss_health[0] < self.boss_health[1]:
-                return 0.1, True, False
+                reward += (0.8 * self.multiplier_damage)
+                return reward, True, False
             else:
                 if self.boss_health[0] < 10 and self._is_boss_dead(frames[-2]):
                     return 1, True, True
 
-                return 0.001, True, False
+                return reward, True, False
         else:
             return 0, False, False
 
