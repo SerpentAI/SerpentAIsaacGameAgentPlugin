@@ -186,10 +186,11 @@ class SerpentAIsaacGameAgent(GameAgent):
         except Exception:
             pass
 
-        self.analytics_client.track(
-            event_key="INITIALIZE",
-            data=dict(episode_rewards=[[index, reward] for index, reward in enumerate(self.rewards)])
-        )
+        self.analytics_client.track(event_key="INITIALIZE", data=dict(episode_rewards=[]))
+
+        for reward in self.rewards:
+            self.analytics_client.track(event_key="EPISODE_REWARD", data=dict(reward=reward))
+            time.sleep(0.01)
 
         # Warm Agent?
         game_frame_buffer = FrameGrabber.get_frames([0, 1, 2, 3], frame_type="PIPELINE")
@@ -198,8 +199,7 @@ class SerpentAIsaacGameAgent(GameAgent):
         self.health = collections.deque(np.full((16,), 6), maxlen=16)
         self.boss_health = collections.deque(np.full((8,), self.boss_hp_mapping[self.boss]), maxlen=8)
 
-        self.multiplier_alive = 1.0
-        self.multiplier_damage = 1.0
+        self.multiplier_damage = 0
 
         self.boss_skull_image = None
 
@@ -288,7 +288,6 @@ class SerpentAIsaacGameAgent(GameAgent):
         if is_alive:
             self.death_check = False
 
-            self.printer.add(f"Survival Multiplier: {round(self.multiplier_alive, 2)}")
             self.printer.add(f"Boss Damage Multiplier: {round(self.multiplier_damage, 2)}")
             self.printer.add("")
             self.printer.add(f"Average Rewards (Last 10 Runs): {round(self.average_reward_10, 2)}")
@@ -381,8 +380,7 @@ class SerpentAIsaacGameAgent(GameAgent):
                 self.health = collections.deque(np.full((16,), 6), maxlen=16)
                 self.boss_health = collections.deque(np.full((8,), self.boss_hp_mapping[self.boss]), maxlen=8)
 
-                self.multiplier_alive = 1.0
-                self.multiplier_damage = 1.0
+                self.multiplier_damage = 0
 
                 self.performed_inputs.clear()
 
@@ -406,37 +404,25 @@ class SerpentAIsaacGameAgent(GameAgent):
             self.first_run = True
 
     def reward_aisaac(self, frames, **kwargs):
-        boss_damaged_recently = len(set(self.boss_health)) > 1
-
-        if boss_damaged_recently:
-            self.multiplier_alive = 1.0
-        else:
-            if self.multiplier_alive - 0.01 >= 0.1:
-                self.multiplier_alive -= 0.01
-            else:
-                self.multiplier_alive = 0.1
-
-        self.multiplier_damage = 1 / len(set(self.health))
-
         reward = 0
         is_alive = self.health[0] + self.health[1]
 
         if is_alive:
-            reward += (0.2 * self.multiplier_alive)
-
             if self.health[0] < self.health[1]:
-                factor = self.health[1] - self.health[0]
-                reward -= factor * 0.1 * self.multiplier_alive
-
-                return reward, True, False
+                self.multiplier_damage = 0
+                return 0, True, False
             elif self.boss_health[0] < self.boss_health[1]:
-                reward += (0.8 * self.multiplier_damage)
-                return reward, True, False
+                self.multiplier_damage += 0.05
+
+                if self.multiplier_damage > 1:
+                    self.multiplier_damage = 1
+
+                return (1 * self.multiplier_damage) + 0.001, True, False
             else:
                 if self.boss_health[0] < 10 and self._is_boss_dead(frames[-2]):
                     return 1, True, True
 
-                return reward, True, False
+                return 0.001, True, False
         else:
             return 0, False, False
 

@@ -40,8 +40,7 @@ class SerpentPPO:
             {"type": "conv2d", "size": 64, "window": 4, "stride": 2},
             {"type": "conv2d", "size": 64, "window": 3, "stride": 1},
             {"type": "flatten"},
-            {"type": "dense", "size": 512},
-            {"type": "dense", "size": 512}
+            {"type": "dense", "size": 1024}
         ]
 
         self.agent = PPOAgent(
@@ -55,20 +54,20 @@ class SerpentPPO:
             session_config=None,
             saver_spec=None,
             distributed_spec=None,
-            discount=0.995,
+            discount=0.97,
             variable_noise=None,
             states_preprocessing_spec=None,
             explorations_spec=None,
             reward_preprocessing_spec=None,
             distributions_spec=None,
-            entropy_regularization=0.1,
+            entropy_regularization=0.01,
             batch_size=2560,
             keep_last_timestep=True,
             baseline_mode=None,
             baseline=None,
             baseline_optimizer=None,
             gae_lambda=None,
-            likelihood_ratio_clipping=0.3,
+            likelihood_ratio_clipping=None,
             step_optimizer=None,
             optimization_steps=10
         )
