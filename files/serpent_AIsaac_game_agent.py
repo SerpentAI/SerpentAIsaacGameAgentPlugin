@@ -47,13 +47,13 @@ class SerpentAIsaacGameAgent(GameAgent):
             }
         ]
 
-        # self.agent = RandomAgent(
-        #     "AIsaac",
-        #     game_inputs=self.game_inputs,
-        #     callbacks=dict(
-        #         after_observe=self.after_agent_observe
-        #     )
-        # )
+        self.agent = RandomAgent(
+            "AIsaac",
+            game_inputs=self.game_inputs,
+            callbacks=dict(
+                after_observe=self.after_agent_observe
+            )
+        )
 
         # self.agent = RecorderAgent(
         #     "AIsaac",
@@ -64,22 +64,22 @@ class SerpentAIsaacGameAgent(GameAgent):
         #     window_geometry=self.game.window_geometry
         # )
 
-        self.agent = RainbowDQNAgent(
-            "AIsaac",
-            game_inputs=self.game_inputs,
-            callbacks=dict(
-                after_observe=self.after_agent_observe,
-                before_update=self.before_agent_update,
-                after_update=self.after_agent_update
-            ),
-            evaluate_every=100,
-            evaluate_for=10,
-            rainbow_kwargs=dict(
-                replay_memory_capacity=200000,
-                observe_steps=50000,
-                hidden_size=1024
-            )
-        )
+        # self.agent = RainbowDQNAgent(
+        #     "AIsaac",
+        #     game_inputs=self.game_inputs,
+        #     callbacks=dict(
+        #         after_observe=self.after_agent_observe,
+        #         before_update=self.before_agent_update,
+        #         after_update=self.after_agent_update
+        #     ),
+        #     evaluate_every=100,
+        #     evaluate_for=10,
+        #     rainbow_kwargs=dict(
+        #         replay_memory_capacity=200000,
+        #         observe_steps=50000,
+        #         hidden_size=1024
+        #     )
+        # )
 
         self.started_at = datetime.utcnow().isoformat()
 
@@ -107,7 +107,7 @@ class SerpentAIsaacGameAgent(GameAgent):
             frame_buffer = FrameGrabber.get_frames([0, 2, 4, 6], frame_type="PIPELINE")
             agent_actions = self.agent.generate_actions(frame_buffer)
 
-            self.environment.perform_input(agent_actions)
+            #self.environment.perform_input(agent_actions)
         else:
             self.environment.clear_input()
 
@@ -124,7 +124,7 @@ class SerpentAIsaacGameAgent(GameAgent):
             elif game_state["boss_dead"]:
                 return 1
 
-            multiplier = 1  # TODO
+            multiplier = 0.8 + (0.2 - (0.2 * (game_state["boss_hp"] / game_state["boss_hp_total"])))
 
             reward_damage_dealt = math.exp(-game_state["steps_since_damage_dealt"] / 3.0)
             reward_damage_taken = math.exp(game_state["steps_since_damage_taken"] / 16.0)
