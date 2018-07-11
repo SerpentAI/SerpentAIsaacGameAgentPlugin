@@ -1,4 +1,5 @@
 import time
+import math
 
 from datetime import datetime
 
@@ -116,17 +117,19 @@ class SerpentAIsaacGameAgent(GameAgent):
             self.environment.new_episode(maximum_steps=960, reset=self.agent.mode.name != "TRAIN")
 
     def reward_aisaac(self, game_state, game_frame):
-        was_damaged_recently = len(set(game_state["isaac_hps"])) > 1
-
         if game_state["isaac_alive"]:
             if game_state["damage_taken"]:
-                return -1
+                damage_taken = game_state["isaac_hps"][1] - game_state["isaac_hps"][0]
+                return -(damage_taken * 0.5)
             elif game_state["boss_dead"]:
-                return (self.environment.episode_maximum_steps - self.environment.episode_steps) * 0.2
-            elif game_state["damage_dealt"]:
-                return 0.333 if not was_damaged_recently else 0
-            else:
-                return 0
+                return 1
+
+            multiplier = 1  # TODO
+
+            reward_damage_dealt = math.exp(-game_state["steps_since_damage_dealt"] / 3.0)
+            reward_damage_taken = math.exp(game_state["steps_since_damage_taken"] / 16.0)
+
+            return ((reward_damage_dealt * (reward_damage_taken - 1.0)) / (reward_damage_taken + 1)) * multiplier
         else:
             return -1
 
