@@ -35,8 +35,23 @@ class SerpentAIsaacGameAgent(GameAgent):
             game_api=self.game.api,
             input_controller=self.input_controller,
             bosses=[
-                Bosses.MONSTRO
-            ]
+                Bosses.GEMINI,
+                Bosses.RAGMAN,
+                Bosses.DARKONE,
+                Bosses.THEFORSAKEN,
+                Bosses.THEBLOAT,
+                Bosses.WAR,
+                Bosses.THEFALLEN
+            ],
+            items={
+                Bosses.GEMINI: [Items.LUNCH],
+                Bosses.RAGMAN: [Items.STEVEN],
+                Bosses.DARKONE: [Items.MOMSLIPSTICK],
+                Bosses.THEFORSAKEN: [Items.LUNCH, Items.THESADONION],
+                Bosses.THEBLOAT: [Items.SCREW, Items.MEAT, Items.JESUSJUICE, Items.STEVEN],
+                Bosses.WAR: [Items.CRICKETSHEAD, Items.SCREW],
+                Bosses.THEFALLEN: [Items.LUNCH, Items.PISCES] 
+            }
         )
 
         self.game_inputs = [
@@ -72,12 +87,14 @@ class SerpentAIsaacGameAgent(GameAgent):
         #         before_update=self.before_agent_update,
         #         after_update=self.after_agent_update
         #     ),
-        #     evaluate_every=100,
-        #     evaluate_for=10,
+        #     evaluate_every=100000000,
+        #     evaluate_for=1,
         #     rainbow_kwargs=dict(
         #         replay_memory_capacity=200000,
-        #         observe_steps=50000,
-        #         hidden_size=1024
+        #         observe_steps=25000,
+        #         hidden_size=512,
+        #         discount=0.9,
+        #         max_steps=10000000
         #     )
         # )
 
@@ -107,11 +124,14 @@ class SerpentAIsaacGameAgent(GameAgent):
             frame_buffer = FrameGrabber.get_frames([0, 2, 4, 6], frame_type="PIPELINE")
             agent_actions = self.agent.generate_actions(frame_buffer)
 
-            #self.environment.perform_input(agent_actions)
+            self.environment.perform_input(agent_actions)
         else:
             self.environment.clear_input()
 
             self.agent.reset()
+
+            if self.environment.game_state["boss_dead"]:
+                self.analytics_client.track(event_key="BOSS_KILL", data={"foo": "bar"})
 
             self.environment.end_episode()
             self.environment.new_episode(maximum_steps=960, reset=self.agent.mode.name != "TRAIN")
@@ -124,12 +144,12 @@ class SerpentAIsaacGameAgent(GameAgent):
             elif game_state["boss_dead"]:
                 return 1
 
-            multiplier = 0.8 + (0.2 - (0.2 * (game_state["boss_hp"] / game_state["boss_hp_total"])))
+            multiplier = 0.1
 
             reward_damage_dealt = math.exp(-game_state["steps_since_damage_dealt"] / 3.0)
-            reward_damage_taken = math.exp(game_state["steps_since_damage_taken"] / 16.0)
+            reward_damage_taken = math.exp(game_state["steps_since_damage_taken"] / 32.0)
 
-            return ((reward_damage_dealt * (reward_damage_taken - 1.0)) / (reward_damage_taken + 1)) * multiplier
+            return round(((reward_damage_dealt * (reward_damage_taken - 1.0)) / (reward_damage_taken + 1)) * multiplier, 3)
         else:
             return -1
 
