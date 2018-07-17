@@ -37,20 +37,22 @@ class SerpentAIsaacGameAgent(GameAgent):
             bosses=[
                 Bosses.GEMINI,
                 Bosses.RAGMAN,
-                Bosses.DARKONE,
                 Bosses.THEFORSAKEN,
                 Bosses.THEBLOAT,
-                Bosses.WAR,
-                Bosses.THEFALLEN
+                Bosses.THEFALLEN,
+                Bosses.THEDUKEOFFLIES,
+                Bosses.MASKOFINFAMY,
+                Bosses.GURDY,
             ],
             items={
                 Bosses.GEMINI: [Items.LUNCH],
                 Bosses.RAGMAN: [Items.STEVEN],
-                Bosses.DARKONE: [Items.MOMSLIPSTICK],
                 Bosses.THEFORSAKEN: [Items.LUNCH, Items.THESADONION],
                 Bosses.THEBLOAT: [Items.SCREW, Items.MEAT, Items.JESUSJUICE, Items.STEVEN],
-                Bosses.WAR: [Items.CRICKETSHEAD, Items.SCREW],
-                Bosses.THEFALLEN: [Items.LUNCH, Items.PISCES] 
+                Bosses.THEFALLEN: [Items.LUNCH, Items.PISCES],
+                Bosses.THEDUKEOFFLIES: [Items.SCREW],
+                Bosses.MASKOFINFAMY: [Items.LUNCH, Items.THESADONION],
+                Bosses.GURDY: [Items.LUNCH, Items.JESUSJUICE],
             }
         )
 
@@ -62,13 +64,13 @@ class SerpentAIsaacGameAgent(GameAgent):
             }
         ]
 
-        self.agent = RandomAgent(
-            "AIsaac",
-            game_inputs=self.game_inputs,
-            callbacks=dict(
-                after_observe=self.after_agent_observe
-            )
-        )
+        # self.agent = RandomAgent(
+        #     "AIsaac",
+        #     game_inputs=self.game_inputs,
+        #     callbacks=dict(
+        #         after_observe=self.after_agent_observe
+        #     )
+        # )
 
         # self.agent = RecorderAgent(
         #     "AIsaac",
@@ -79,24 +81,25 @@ class SerpentAIsaacGameAgent(GameAgent):
         #     window_geometry=self.game.window_geometry
         # )
 
-        # self.agent = RainbowDQNAgent(
-        #     "AIsaac",
-        #     game_inputs=self.game_inputs,
-        #     callbacks=dict(
-        #         after_observe=self.after_agent_observe,
-        #         before_update=self.before_agent_update,
-        #         after_update=self.after_agent_update
-        #     ),
-        #     evaluate_every=100000000,
-        #     evaluate_for=1,
-        #     rainbow_kwargs=dict(
-        #         replay_memory_capacity=200000,
-        #         observe_steps=25000,
-        #         hidden_size=512,
-        #         discount=0.9,
-        #         max_steps=10000000
-        #     )
-        # )
+        self.agent = RainbowDQNAgent(
+            "AIsaac",
+            game_inputs=self.game_inputs,
+            callbacks=dict(
+                after_observe=self.after_agent_observe,
+                before_update=self.before_agent_update,
+                after_update=self.after_agent_update
+            ),
+            evaluate_every=100000000,
+            evaluate_for=1,
+            rainbow_kwargs=dict(
+                replay_memory_capacity=250000,
+                observe_steps=50000,
+                hidden_size=512,
+                discount=0.99,
+                max_steps=10000000,
+                noisy_std=0.25
+            )
+        )
 
         self.started_at = datetime.utcnow().isoformat()
 
@@ -144,12 +147,13 @@ class SerpentAIsaacGameAgent(GameAgent):
             elif game_state["boss_dead"]:
                 return 1
 
-            multiplier = 0.1
+            time_penalty = -0.01
+            multiplier = 0.25
 
             reward_damage_dealt = math.exp(-game_state["steps_since_damage_dealt"] / 3.0)
-            reward_damage_taken = math.exp(game_state["steps_since_damage_taken"] / 32.0)
+            reward_damage_taken = math.exp(game_state["steps_since_damage_taken"] / 16.0)
 
-            return round(((reward_damage_dealt * (reward_damage_taken - 1.0)) / (reward_damage_taken + 1)) * multiplier, 3)
+            return round((((reward_damage_dealt * (reward_damage_taken - 1.0)) / (reward_damage_taken + 1)) * multiplier) + time_penalty, 3)
         else:
             return -1
 
