@@ -14,6 +14,7 @@ from serpent.input_controller import KeyboardKey
 
 from serpent.machine_learning.reinforcement_learning.agents.random_agent import RandomAgent
 from serpent.machine_learning.reinforcement_learning.agents.rainbow_dqn_agent import RainbowDQNAgent
+from serpent.machine_learning.reinforcement_learning.agents.ppo_agent import PPOAgent
 from serpent.machine_learning.reinforcement_learning.agents.recorder_agent import RecorderAgent
 
 
@@ -35,25 +36,9 @@ class SerpentAIsaacGameAgent(GameAgent):
             game_api=self.game.api,
             input_controller=self.input_controller,
             bosses=[
-                Bosses.GEMINI,
-                Bosses.RAGMAN,
-                Bosses.THEFORSAKEN,
-                Bosses.THEBLOAT,
-                Bosses.THEFALLEN,
-                Bosses.THEDUKEOFFLIES,
-                Bosses.MASKOFINFAMY,
-                Bosses.GURDY,
+                Bosses.DINGLE
             ],
-            items={
-                Bosses.GEMINI: [Items.LUNCH],
-                Bosses.RAGMAN: [Items.STEVEN],
-                Bosses.THEFORSAKEN: [Items.LUNCH, Items.THESADONION],
-                Bosses.THEBLOAT: [Items.SCREW, Items.MEAT, Items.JESUSJUICE, Items.STEVEN],
-                Bosses.THEFALLEN: [Items.LUNCH, Items.PISCES],
-                Bosses.THEDUKEOFFLIES: [Items.SCREW],
-                Bosses.MASKOFINFAMY: [Items.LUNCH, Items.THESADONION],
-                Bosses.GURDY: [Items.LUNCH, Items.JESUSJUICE],
-            }
+            items=[]
         )
 
         self.game_inputs = [
@@ -81,7 +66,28 @@ class SerpentAIsaacGameAgent(GameAgent):
         #     window_geometry=self.game.window_geometry
         # )
 
-        self.agent = RainbowDQNAgent(
+        # self.agent = RainbowDQNAgent(
+        #     "AIsaac",
+        #     game_inputs=self.game_inputs,
+        #     callbacks=dict(
+        #         after_observe=self.after_agent_observe,
+        #         before_update=self.before_agent_update,
+        #         after_update=self.after_agent_update
+        #     ),
+        #     evaluate_every=100000000,
+        #     evaluate_for=1,
+        #     rainbow_kwargs=dict(
+        #         replay_memory_capacity=250000,
+        #         observe_steps=25000,
+        #         hidden_size=1024,
+        #         conv_layers=4,
+        #         discount=0.99,
+        #         max_steps=5000000,
+        #         noisy_std=0.1
+        #     )
+        # )
+
+        self.agent = PPOAgent(
             "AIsaac",
             game_inputs=self.game_inputs,
             callbacks=dict(
@@ -89,15 +95,10 @@ class SerpentAIsaacGameAgent(GameAgent):
                 before_update=self.before_agent_update,
                 after_update=self.after_agent_update
             ),
-            evaluate_every=100000000,
-            evaluate_for=1,
-            rainbow_kwargs=dict(
-                replay_memory_capacity=250000,
-                observe_steps=50000,
-                hidden_size=512,
-                discount=0.99,
-                max_steps=10000000,
-                noisy_std=0.25
+            input_shape=(100, 100),
+            ppo_kwargs=dict(
+                memory_capacity=2048,
+                discount=0.9
             )
         )
 
@@ -141,19 +142,19 @@ class SerpentAIsaacGameAgent(GameAgent):
 
     def reward_aisaac(self, game_state, game_frame):
         if game_state["isaac_alive"]:
-            if game_state["damage_taken"]:
-                damage_taken = game_state["isaac_hps"][1] - game_state["isaac_hps"][0]
-                return -(damage_taken * 0.5)
-            elif game_state["boss_dead"]:
+            if game_state["boss_dead"]:
                 return 1
 
-            time_penalty = -0.01
-            multiplier = 0.25
+            time_penalty = 0.01
+            damage_multiplier = 0.5
 
-            reward_damage_dealt = math.exp(-game_state["steps_since_damage_dealt"] / 3.0)
-            reward_damage_taken = math.exp(game_state["steps_since_damage_taken"] / 16.0)
+            reward = 0
+            reward -= time_penalty
 
-            return round((((reward_damage_dealt * (reward_damage_taken - 1.0)) / (reward_damage_taken + 1)) * multiplier) + time_penalty, 3)
+            if game_state["damage_dealt"]:
+                reward += (1 * damage_multiplier)
+            
+            return reward
         else:
             return -1
 
