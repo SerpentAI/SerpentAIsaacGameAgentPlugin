@@ -98,7 +98,9 @@ class SerpentAIsaacGameAgent(GameAgent):
             input_shape=(100, 100),
             ppo_kwargs=dict(
                 memory_capacity=2048,
-                discount=0.9
+                discount=0.9,
+                batch_size=64,
+                epsilon=0.2
             )
         )
 
@@ -142,19 +144,19 @@ class SerpentAIsaacGameAgent(GameAgent):
 
     def reward_aisaac(self, game_state, game_frame):
         if game_state["isaac_alive"]:
-            if game_state["boss_dead"]:
+            if game_state["damage_taken"]:
+                damage_taken = game_state["isaac_hps"][1] - game_state["isaac_hps"][0]
+                return -(damage_taken * 0.5)
+            elif game_state["boss_dead"]:
                 return 1
 
-            time_penalty = 0.01
-            damage_multiplier = 0.5
+            time_penalty = -0.01
+            multiplier = 0.33
 
-            reward = 0
-            reward -= time_penalty
+            reward_damage_dealt = math.exp(-game_state["steps_since_damage_dealt"] / 3.0)
+            reward_damage_taken = math.exp(game_state["steps_since_damage_taken"] / 16.0)
 
-            if game_state["damage_dealt"]:
-                reward += (1 * damage_multiplier)
-            
-            return reward
+            return round((((reward_damage_dealt * (reward_damage_taken - 1.0)) / (reward_damage_taken + 1)) * multiplier) + time_penalty, 3)
         else:
             return -1
 
