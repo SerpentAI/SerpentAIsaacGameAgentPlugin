@@ -38,7 +38,9 @@ class SerpentAIsaacGameAgent(GameAgent):
             bosses=[
                 Bosses.DINGLE
             ],
-            items=[]
+            items=[
+                Items.MEAT
+            ]
         )
 
         self.game_inputs = [
@@ -149,14 +151,11 @@ class SerpentAIsaacGameAgent(GameAgent):
                 return -(damage_taken * 0.5)
             elif game_state["boss_dead"]:
                 return 1
-
-            time_penalty = -0.01
-            multiplier = 0.33
-
-            reward_damage_dealt = math.exp(-game_state["steps_since_damage_dealt"] / 3.0)
-            reward_damage_taken = math.exp(game_state["steps_since_damage_taken"] / 16.0)
-
-            return round((((reward_damage_dealt * (reward_damage_taken - 1.0)) / (reward_damage_taken + 1)) * multiplier) + time_penalty, 3)
+            elif game_state["damage_dealt"]
+                if game_state["steps_since_damage_dealt"] > 24:
+                    return round(0.25, 3)
+                
+            return 0
         else:
             return -1
 
